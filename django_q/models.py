@@ -19,8 +19,26 @@ class Task(models.Model):
     result = PickledObjectField(null=True, protocol=-1)
     group = models.CharField(max_length=100, editable=False, null=True)
     started = models.DateTimeField(editable=False)
-    stopped = models.DateTimeField(editable=False)
+    stopped = models.DateTimeField(editable=False, null=True, blank=True)
     success = models.BooleanField(default=True, editable=False)
+
+    PENDING = "PENDING"
+    INPROGRESS = "INPROGRESS"
+    FAILED = "FAILED"
+    SUCCESS = "SUCCESS"
+
+    STATUS_CHOICES = (
+        (PENDING, _("Pending")),
+        (INPROGRESS, _("In Progress")),
+        (FAILED, _("Failed")),
+        (SUCCESS, _("Succeeded")),
+    )
+
+    progress_fraction = models.FloatField(default=0)
+    progress_data = PickledObjectField(null=True, protocol=-1)
+    is_updating_progress = models.BooleanField(default=False)
+    task_status = models.CharField(max_length=15, choices=STATUS_CHOICES, default=PENDING)
+
 
     @staticmethod
     def get_result(task_id):
