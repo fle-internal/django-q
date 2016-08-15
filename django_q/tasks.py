@@ -18,7 +18,7 @@ from django_q.brokers import get_broker
 def async(func, *args, **kwargs):
     """Queue a task for the cluster."""
     keywords = kwargs.copy()
-    opt_keys = ('hook', 'group', 'save', 'sync', 'cached', 'iter_count', 'iter_cached', 'chain', 'broker')
+    opt_keys = ('hook', 'group', 'save', 'sync', 'cached', 'iter_count', 'iter_cached', 'chain', 'broker', 'progress_updates')
     q_options = keywords.pop('q_options', {})
     # get an id
     tag = uuid()
@@ -43,6 +43,7 @@ def async(func, *args, **kwargs):
     # finalize
     task['kwargs'] = keywords
     task['started'] = timezone.now()
+    task['is_progress_updating'] = bool(task.get('progress_updates', False))
     # sign it
     pack = signing.SignedPackage.dumps(task)
     if task.get('sync', False):
