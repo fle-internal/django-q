@@ -16,6 +16,7 @@ import signal
 import socket
 import ast
 from time import sleep
+from functools import partial
 from multiprocessing import Queue, Event, Process, Value, current_process
 
 # external
@@ -366,24 +367,35 @@ def worker(task_queue, result_queue, timer, timeout=Conf.TIMEOUT):
                 m = importlib.import_module(module)
                 f = getattr(m, func)
             except (ValueError, ImportError, AttributeError) as e:
-                result = (e, False)
+                result = (e, False, Task.FAILED)
                 if rollbar:
                     rollbar.report_exc_info()
         # We're still going
         if not result:
             db.close_old_connections()
+
+            if task['is_progress_updating']:
+                task['kwargs']['update_state'] = partial(update_task_progress, task)
+
             # execute the payload
             timer.value = task['kwargs'].pop('timeout', timeout or 0)  # Busy
             try:
                 res = f(*task['args'], **task['kwargs'])
-                result = (res, True)
+                result = (res, True, Task.SUCCESS)
             except Exception as e:
-                result = ('{}'.format(e), False)
+                result = ('{}'.format(e), False, Task.FAILED)
                 if rollbar:
                     rollbar.report_exc_info()
+
+        # make sure to remove the update_state func before shuffling across
+        # process boundaries (through the result_queue), since its globals()
+        # contains multiprocessing.Queue objects, which are unpickleable
+        task['kwargs'].pop('update_state')
+
         # Process result
         task['result'] = result[0]
         task['success'] = result[1]
+        task['task_status'] = result[2]
         task['stopped'] = timezone.now()
         result_queue.put(task)
         timer.value = -1  # Idle
@@ -392,6 +404,24 @@ def worker(task_queue, result_queue, timer, timeout=Conf.TIMEOUT):
             timer.value = -2  # Recycled
             break
     logger.info(_('{} stopped doing work').format(name))
+
+
+def update_task_progress(task, progress_fraction, progress_data):
+    from django_q.brokers import get_broker
+    broker = get_broker()
+    task['progress_data'] = progress_data
+    task['success'] = False
+    task['stopped'] = None
+    task['result'] = None
+    task['task_status'] = Task.INPROGRESS
+    task['progress_fraction'] = progress_fraction
+
+    # save_task might be slow if we keep writing to the same DB many times per
+    # second. TODO optimize if it proves slow on production.
+    if task.get('cached', False):
+        save_cached(task, broker)
+    else:
+        save_task(task, broker)
 
 
 def save_task(task, broker):
@@ -417,6 +447,9 @@ def save_task(task, broker):
                 existing_task.stopped = task['stopped']
                 existing_task.result = task['result']
                 existing_task.success = task['success']
+                existing_task.task_status = task['task_status']
+                existing_task.progress_fraction = task.get('progress_fraction', 0)
+                existing_task.progress_data = task.get('progress_data')
                 existing_task.save()
         else:
             Task.objects.create(id=task['id'],
@@ -429,10 +462,14 @@ def save_task(task, broker):
                                 stopped=task['stopped'],
                                 result=task['result'],
                                 group=task.get('group'),
-                                success=task['success']
+                                success=task['success'],
+                                progress_fraction=task.get('progress_fraction', 0),
+                                progress_data=task.get('progress_data'),
+                                task_status=task['task_status'],
                                 )
     except Exception as e:
-        logger.error(e)
+        import traceback; traceback.print_exc()
+        logger.error("Got exception while saving task: {}".format(e))
 
 
 def save_cached(task, broker):
