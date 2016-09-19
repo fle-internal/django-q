@@ -390,7 +390,7 @@ def worker(task_queue, result_queue, timer, timeout=Conf.TIMEOUT):
         # make sure to remove the update_state func before shuffling across
         # process boundaries (through the result_queue), since its globals()
         # contains multiprocessing.Queue objects, which are unpickleable
-        task['kwargs'].pop('update_state')
+        task['kwargs'].pop('update_state', None)
 
         # Process result
         task['result'] = result[0]

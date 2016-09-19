@@ -44,6 +44,11 @@ def async(func, *args, **kwargs):
     task['kwargs'] = keywords
     task['started'] = timezone.now()
     task['is_progress_updating'] = bool(task.get('progress_updates', False))
+    task['success'] = False
+    task['stopped'] = None
+    task['result'] = None
+    task['task_status'] = Task.PENDING
+
     # sign it
     pack = signing.SignedPackage.dumps(task)
     if task.get('sync', False):
@@ -51,6 +56,8 @@ def async(func, *args, **kwargs):
     # push it
     broker.enqueue(pack)
     logger.debug('Pushed {}'.format(tag))
+    # create initial task result entry
+    cluster.save_task(task, broker)
     return task['id']
 
 
