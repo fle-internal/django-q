@@ -329,11 +329,11 @@ def monitor(result_queue, broker=None):
         else:
             save_task(task, broker)
         # acknowledge and log the result
+        # acknowledging it means we don't rerun the task anymore.
+        ack_id = task.pop('ack_id', False)
+        if ack_id:
+            broker.acknowledge(ack_id)
         if task['success']:
-            # acknowledge
-            ack_id = task.pop('ack_id', False)
-            if ack_id:
-                broker.acknowledge(ack_id)
             # log success
             logger.info(_("Processed [{}]").format(task['name']))
         else:
