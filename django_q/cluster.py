@@ -383,7 +383,7 @@ def worker(task_queue, result_queue, timer, timeout=Conf.TIMEOUT):
                 res = f(*task['args'], **task['kwargs'])
                 result = (res, True, Task.SUCCESS)
             except Exception as e:
-                result = ('{}'.format(e), False, Task.FAILED)
+                result = (e, False, Task.FAILED)
                 if rollbar:
                     rollbar.report_exc_info()
 
