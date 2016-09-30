@@ -21,7 +21,7 @@ def async(func, *args, **kwargs):
     opt_keys = ('hook', 'group', 'save', 'sync', 'cached', 'iter_count', 'iter_cached', 'chain', 'broker', 'progress_updates')
     q_options = keywords.pop('q_options', {})
     # get an id
-    tag = uuid()
+    tag = keywords.pop('uuid', None) or uuid()
     # build the task package
     task = {'id': tag[1],
             'name': keywords.pop('task_name', None) or q_options.pop('task_name', None) or tag[0],
@@ -682,5 +682,6 @@ def _sync(pack):
     task_queue.put('STOP')
     cluster.worker(task_queue, result_queue, Value('f', -1))
     result_queue.put('STOP')
+
     cluster.monitor(result_queue)
     return task['id']
