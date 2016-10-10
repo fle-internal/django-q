@@ -12,6 +12,7 @@ standard_library.install_aliases()
 
 # Standard
 import importlib
+import os
 import signal
 import socket
 import ast
@@ -357,6 +358,15 @@ def worker(task_queue, result_queue, timer, timeout=Conf.TIMEOUT):
         result = None
         timer.value = -1  # Idle
         task_count += 1
+
+        # record the current worker's PID, so we can kill it later
+        task['worker_process_pid'] = os.getpid()
+        logger.info("Got job for worker {}".format(os.getpid()))
+        Task.objects.filter(id=task['id']).update(worker_process_pid=task['worker_process_pid'])
+
+        # mark the task as being run now.
+        Task.objects.filter(id=task['id']).update(task_status=Task.INPROGRESS)
+
         # Get the function from the task
         logger.info(_('{} processing [{}]').format(name, task['name']))
         f = task['func']
@@ -463,6 +473,7 @@ def save_task(task, broker):
                                 result=task['result'],
                                 group=task.get('group'),
                                 success=task['success'],
+                                worker_process_pid=task.get('worker_process_pid'),
                                 progress_fraction=task.get('progress_fraction', 0),
                                 progress_data=task.get('progress_data'),
                                 task_status=task['task_status'],

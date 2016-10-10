@@ -18,6 +18,7 @@ class Task(models.Model):
     kwargs = PickledObjectField(null=True, protocol=-1)
     result = PickledObjectField(null=True, protocol=-1)
     group = models.CharField(max_length=100, editable=False, null=True)
+    worker_process_pid = models.IntegerField(null=True, blank=True)
     started = models.DateTimeField(editable=False)
     stopped = models.DateTimeField(editable=False, null=True, blank=True)
     success = models.BooleanField(default=True, editable=False)
