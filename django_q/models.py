@@ -112,7 +112,11 @@ class Task(models.Model):
                 ctypes.windll.kernel32.CloseHandle(handle)
             else:               # Hopefully you're using a Unix-like OS
                 import signal
-                os.kill(pid, signal.SIGTERM)
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except OSError as e:  # maybe the process doesn't exist anymore, hence this error
+                    logging.warning("Got error trying to kill worker {pid}: {e}".format(pid=pid, e=e))
+                    KILL_SUCCESS = False
 
             if KILL_SUCCESS:
                 logging.info("Successfully killed worker with pid {pid}.".format(pid=pid))
