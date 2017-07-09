@@ -1,3 +1,6 @@
+import logging as logger
+import os
+import platform
 from django import get_version
 from django.core.urlresolvers import reverse
 from django.utils.translation import ugettext_lazy as _
@@ -7,6 +10,8 @@ from picklefield import PickledObjectField
 from picklefield.fields import dbsafe_decode
 
 from django_q.signing import SignedPackage
+
+logging = logger.getLogger(__name__)
 
 
 class Task(models.Model):
@@ -18,9 +23,28 @@ class Task(models.Model):
     kwargs = PickledObjectField(null=True, protocol=-1)
     result = PickledObjectField(null=True, protocol=-1)
     group = models.CharField(max_length=100, editable=False, null=True)
+    worker_process_pid = models.IntegerField(null=True, blank=True)
     started = models.DateTimeField(editable=False)
-    stopped = models.DateTimeField(editable=False)
+    stopped = models.DateTimeField(editable=False, null=True, blank=True)
     success = models.BooleanField(default=True, editable=False)
+
+    PENDING = "PENDING"
+    INPROGRESS = "INPROGRESS"
+    FAILED = "FAILED"
+    SUCCESS = "SUCCESS"
+
+    STATUS_CHOICES = (
+        (PENDING, _("Pending")),
+        (INPROGRESS, _("In Progress")),
+        (FAILED, _("Failed")),
+        (SUCCESS, _("Succeeded")),
+    )
+
+    progress_fraction = models.FloatField(default=0)
+    progress_data = PickledObjectField(null=True, protocol=-1)
+    is_updating_progress = models.BooleanField(default=False)
+    task_status = models.CharField(max_length=15, choices=STATUS_CHOICES, default=PENDING)
+
 
     @staticmethod
     def get_result(task_id):
@@ -61,6 +85,41 @@ class Task(models.Model):
     def group_delete(self, tasks=False):
         if self.group:
             return self.delete_group(self.group, tasks)
+
+    def kill_running_task(self):
+        # make sure to refresh the model values before continuing
+        self.refresh_from_db()
+
+        if self.task_status != self.INPROGRESS:
+            logging.warning("Task {} not running; no killing will happen.".format(self.id))
+            return
+        else:
+            pid = self.worker_process_pid
+            assert pid != None, "worker process pid should not be None!"
+
+            KILL_SUCCESS = True
+            if platform.platform() == "Windows":
+                import ctypes
+                # initiate long dance to kill a windows process
+                PROCESS_TERMINATE_FLAG = 1
+                handle = ctypes.windll.kernel32.OpenProcess(PROCESS_TERMINATE_FLAG, False, pid)
+                windows_kill_return_value = ctypes.windll.kernel32.TerminateProcess(handle, -1)
+
+                if windows_kill_return_value != 1: # not a successfull kill
+                    KILL_SUCCESS = False
+                    logging.warning("Failed to kill worker with pid {pid} gracefully.".format(pid=pid))
+
+                ctypes.windll.kernel32.CloseHandle(handle)
+            else:               # Hopefully you're using a Unix-like OS
+                import signal
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except OSError as e:  # maybe the process doesn't exist anymore, hence this error
+                    logging.warning("Got error trying to kill worker {pid}: {e}".format(pid=pid, e=e))
+                    KILL_SUCCESS = False
+
+            if KILL_SUCCESS:
+                logging.info("Successfully killed worker with pid {pid}.".format(pid=pid))
 
     @staticmethod
     def get_task(task_id):

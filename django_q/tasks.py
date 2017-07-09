@@ -19,10 +19,10 @@ from django_q.signals import pre_enqueue
 def async(func, *args, **kwargs):
     """Queue a task for the cluster."""
     keywords = kwargs.copy()
-    opt_keys = ('hook', 'group', 'save', 'sync', 'cached', 'iter_count', 'iter_cached', 'chain', 'broker')
+    opt_keys = ('hook', 'group', 'save', 'sync', 'cached', 'iter_count', 'iter_cached', 'chain', 'broker', 'progress_updates')
     q_options = keywords.pop('q_options', {})
     # get an id
-    tag = uuid()
+    tag = keywords.pop('uuid', None) or uuid()
     # build the task package
     task = {'id': tag[1],
             'name': keywords.pop('task_name', None) or q_options.pop('task_name', None) or tag[0],
@@ -44,6 +44,11 @@ def async(func, *args, **kwargs):
     # finalize
     task['kwargs'] = keywords
     task['started'] = timezone.now()
+    task['is_progress_updating'] = bool(task.get('progress_updates', False))
+    task['success'] = False
+    task['stopped'] = None
+    task['result'] = None
+    task['task_status'] = Task.PENDING
     # signal it
     pre_enqueue.send(sender="django_q", task=task)
     # sign it
@@ -54,6 +59,8 @@ def async(func, *args, **kwargs):
     enqueue_id = broker.enqueue(pack)
     logger.info('Enqueued {}'.format(enqueue_id))
     logger.debug('Pushed {}'.format(tag))
+    # create initial task result entry
+    cluster.save_task(task, broker)
     return task['id']
 
 
@@ -678,5 +685,6 @@ def _sync(pack):
     task_queue.put('STOP')
     cluster.worker(task_queue, result_queue, Value('f', -1))
     result_queue.put('STOP')
+
     cluster.monitor(result_queue)
     return task['id']
