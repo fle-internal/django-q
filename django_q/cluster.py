@@ -382,16 +382,13 @@ def worker(task_queue, result_queue, timer, timeout=Conf.TIMEOUT):
         # We're still going
         if not result:
             db.close_old_connections()
-<<<<<<< HEAD
             timer_value = task['kwargs'].pop('timeout', timeout or 0)
             # signal execution
             pre_execute.send(sender="django_q", func=f, task=task)
-=======
 
             if task['is_progress_updating']:
                 task['kwargs']['update_state'] = partial(update_task_progress, task)
 
->>>>>>> 934d557d77ded18c4a73a702905a6f8fe932f97b
             # execute the payload
             timer.value = timer_value  # Busy
             try:
