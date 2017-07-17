@@ -11,6 +11,7 @@ myPath = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, myPath + '/../')
 
 from django_q.cluster import Cluster, Sentinel, pusher, worker, monitor, save_task
+from django_q.compat import range
 from django_q.humanhash import DEFAULT_WORDLIST, uuid
 from django_q.tasks import fetch, fetch_group, async, result, result_group, count_group, delete_group, queue_size
 from django_q.models import Task, Success
@@ -29,13 +30,8 @@ class WordClass(object):
 
 
 @pytest.fixture
-def broker():
-    Conf.DISQUE_NODES = None
-    Conf.IRON_MQ = None
-    Conf.SQS = None
-    Conf.ORM = None
-    Conf.MONGO = None
-    Conf.DJANGO_REDIS = 'default'
+def broker(monkeypatch):
+    monkeypatch.setattr(Conf, 'DJANGO_REDIS', 'default')
     return get_broker()
 
 
@@ -281,7 +277,7 @@ def test_timeout_override(broker):
 
 
 @pytest.mark.django_db
-def test_recycle(broker):
+def test_recycle(broker, monkeypatch):
     # set up the Sentinel
     broker.list_key = 'test_recycle_test:q'
     async('django_q.tests.tasks.multiply', 2, 2, broker=broker)
@@ -290,8 +286,8 @@ def test_recycle(broker):
     start_event = Event()
     stop_event = Event()
     # override settings
-    Conf.RECYCLE = 2
-    Conf.WORKERS = 1
+    monkeypatch.setattr(Conf, 'RECYCLE', 2)
+    monkeypatch.setattr(Conf, 'WORKERS', 1)
     # set a timer to stop the Sentinel
     threading.Timer(3, stop_event.set).start()
     s = Sentinel(stop_event, start_event, broker=broker)
@@ -310,7 +306,7 @@ def test_recycle(broker):
     # check if the work has been done
     assert result_queue.qsize() == 2
     # save_limit test
-    Conf.SAVE_LIMIT = 1
+    monkeypatch.setattr(Conf, 'SAVE_LIMIT', 1)
     result_queue.put('STOP')
     # run monitor
     monitor(result_queue)
@@ -361,14 +357,14 @@ def test_update_failed(broker):
     sleep(0.5)
     # second save - no success
     old_stopped = task['stopped']
-    task['stopped']=timezone.now()
+    task['stopped'] = timezone.now()
     save_task(task, broker)
     saved_task = Task.objects.get(id=task['id'])
     assert saved_task.stopped > old_stopped
     # third save - success
-    task['stopped']=timezone.now()
-    task['result']='result'
-    task['success']=True
+    task['stopped'] = timezone.now()
+    task['result'] = 'result'
+    task['success'] = True
     save_task(task, broker)
     saved_task = Task.objects.get(id=task['id'])
     assert saved_task.success is True
@@ -381,9 +377,6 @@ def test_update_failed(broker):
     saved_task = Task.objects.get(id=task['id'])
     assert saved_task.success is True
     assert saved_task.result == 'result'
-
-
-
 
 
 @pytest.mark.django_db

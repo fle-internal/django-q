@@ -13,6 +13,7 @@ from django_q.conf import Conf, logger
 from django_q.models import Schedule, Task
 from django_q.humanhash import uuid
 from django_q.brokers import get_broker
+from django_q.signals import pre_enqueue
 
 
 def async(func, *args, **kwargs):
@@ -48,13 +49,15 @@ def async(func, *args, **kwargs):
     task['stopped'] = None
     task['result'] = None
     task['task_status'] = Task.PENDING
-
+    # signal it
+    pre_enqueue.send(sender="django_q", task=task)
     # sign it
     pack = signing.SignedPackage.dumps(task)
     if task.get('sync', False):
         return _sync(pack)
     # push it
-    broker.enqueue(pack)
+    enqueue_id = broker.enqueue(pack)
+    logger.info('Enqueued {}'.format(enqueue_id))
     logger.debug('Pushed {}'.format(tag))
     # create initial task result entry
     cluster.save_task(task, broker)

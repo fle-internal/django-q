@@ -4,12 +4,6 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from future.builtins import range
-
-from future import standard_library
-
-standard_library.install_aliases()
-
 # Standard
 import importlib
 import os
@@ -33,10 +27,13 @@ from django import db
 import signing
 import tasks
 
+from django_q.compat import range
 from django_q.conf import Conf, logger, psutil, get_ppid, rollbar
 from django_q.models import Task, Success, Schedule
 from django_q.status import Stat, Status
 from django_q.brokers import get_broker
+from django_q.signals import pre_execute
+
 
 
 class Cluster(object):
@@ -150,6 +147,7 @@ class Sentinel(object):
         p = Process(target=target, args=args)
         p.daemon = True
         if target == worker:
+            p.daemon = Conf.DAEMONIZE_WORKERS
             p.timer = args[2]
             self.pool.append(p)
         p.start()
@@ -384,12 +382,15 @@ def worker(task_queue, result_queue, timer, timeout=Conf.TIMEOUT):
         # We're still going
         if not result:
             db.close_old_connections()
+            timer_value = task['kwargs'].pop('timeout', timeout or 0)
+            # signal execution
+            pre_execute.send(sender="django_q", func=f, task=task)
 
             if task['is_progress_updating']:
                 task['kwargs']['update_state'] = partial(update_task_progress, task)
 
             # execute the payload
-            timer.value = task['kwargs'].pop('timeout', timeout or 0)  # Busy
+            timer.value = timer_value  # Busy
             try:
                 res = f(*task['args'], **task['kwargs'])
                 result = (res, True, Task.SUCCESS)
